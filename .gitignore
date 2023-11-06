@@ -1,0 +1,6 @@
+# File extensions to ignore
+*.user
+
+# Folders to ignore
+\.vs
+\x64

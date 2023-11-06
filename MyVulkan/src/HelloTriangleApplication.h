@@ -32,6 +32,8 @@ private:
 	void mainloop();
 	void cleanup();
 	void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
+	bool isDeviceSuitable(VkPhysicalDevice device);
+	void pickPhysicalDevice();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -46,4 +48,5 @@ private:
 
 	VkDebugUtilsMessengerEXT debugMessenger_; //!< Debug Messenger for debug callbacks
 
+	VkPhysicalDevice vkPhysicalDevice_ = VK_NULL_HANDLE; //!< The physical device Vulkan will use to render
 };

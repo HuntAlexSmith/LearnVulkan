@@ -74,6 +74,9 @@ void HelloTriangleApplication::initVulkan() {
 
 	// Also setup debug messenger
 	setupDebugMessenger();
+
+	// Pick the physical device
+	pickPhysicalDevice();
 }
 
 // Create the vulkan instance
@@ -194,6 +197,9 @@ void HelloTriangleApplication::mainloop() {
 
 // Cleanup function
 void HelloTriangleApplication::cleanup() {
+	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
+	//	so we don't need to worry about it
+
 	// Destroy the debug messenger if validation layers are enabled
 	if (enableValidationLayers) {
 		DestroyDebugUtilsMessengerEXT(vkInstance_, debugMessenger_, nullptr);
@@ -215,6 +221,50 @@ void HelloTriangleApplication::populateDebugMessengerCreateInfo(VkDebugUtilsMess
 	createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 	createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
 	createInfo.pfnUserCallback = debugCallback;
+}
+
+bool HelloTriangleApplication::isDeviceSuitable(VkPhysicalDevice device) {
+	// Query the device properties
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+	// Query the device features
+	VkPhysicalDeviceFeatures deviceFeatures;
+	vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+	// Check if the device is what we want (Discrete and has geometry shader)
+	bool result = deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+	result = result && (deviceFeatures.geometryShader);
+
+	return result;
+}
+
+// Function to help Vulkan pick a physical device
+void HelloTriangleApplication::pickPhysicalDevice() {
+	// Get how many physical devices are available
+	uint32_t deviceCount = 0;
+	vkEnumeratePhysicalDevices(vkInstance_, &deviceCount, nullptr);
+
+	// If there are no devices, don't even continue
+	if (deviceCount == 0)
+		throw std::runtime_error("Failed to find GPUs with Vulkan Support!");
+
+	// List out all the available physical devices
+	std::vector<VkPhysicalDevice> devices(deviceCount);
+	vkEnumeratePhysicalDevices(vkInstance_, &deviceCount, devices.data());
+
+	// Check all the devices and check if they are suitable
+	for (const auto& device : devices) {
+		if (isDeviceSuitable(device)) {
+			vkPhysicalDevice_ = device;
+			break;
+		}
+	}
+
+	// If we didn't find a suitable device, throw
+	if (vkPhysicalDevice_ == VK_NULL_HANDLE) {
+		throw std::runtime_error("Failed to find suitable GPU");
+	}
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

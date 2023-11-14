@@ -10,6 +10,7 @@
 
 #include <stdexcept>
 #include <iostream>
+#include <map>
 
 // Window const sizes
 const uint32_t WIDTH = 800;
@@ -77,6 +78,9 @@ void HelloTriangleApplication::initVulkan() {
 
 	// Pick the physical device
 	pickPhysicalDevice();
+
+	// Create a logical device
+	createLogicalDevice();
 }
 
 // Create the vulkan instance
@@ -200,6 +204,9 @@ void HelloTriangleApplication::cleanup() {
 	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
 	//	so we don't need to worry about it
 
+	// Don't forget to destroy the logical device
+	vkDestroyDevice(logicalDevice_, nullptr);
+
 	// Destroy the debug messenger if validation layers are enabled
 	if (enableValidationLayers) {
 		DestroyDebugUtilsMessengerEXT(vkInstance_, debugMessenger_, nullptr);
@@ -223,20 +230,12 @@ void HelloTriangleApplication::populateDebugMessengerCreateInfo(VkDebugUtilsMess
 	createInfo.pfnUserCallback = debugCallback;
 }
 
+// Check if a physical device is suitable for this application
 bool HelloTriangleApplication::isDeviceSuitable(VkPhysicalDevice device) {
-	// Query the device properties
-	VkPhysicalDeviceProperties deviceProperties;
-	vkGetPhysicalDeviceProperties(device, &deviceProperties);
+	// Check the queue families and see if the device is suitable
+	QueueFamilyIndices indices = findQueueFamilies(device);
 
-	// Query the device features
-	VkPhysicalDeviceFeatures deviceFeatures;
-	vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
-
-	// Check if the device is what we want (Discrete and has geometry shader)
-	bool result = deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-	result = result && (deviceFeatures.geometryShader);
-
-	return result;
+	return indices.isComplete();
 }
 
 // Function to help Vulkan pick a physical device
@@ -253,18 +252,127 @@ void HelloTriangleApplication::pickPhysicalDevice() {
 	std::vector<VkPhysicalDevice> devices(deviceCount);
 	vkEnumeratePhysicalDevices(vkInstance_, &deviceCount, devices.data());
 
-	// Check all the devices and check if they are suitable
+	// Rate the device suitability
+	std::multimap<int, VkPhysicalDevice> candidates;
+
 	for (const auto& device : devices) {
-		if (isDeviceSuitable(device)) {
-			vkPhysicalDevice_ = device;
-			break;
-		}
+		int score = rateDeviceSuitability(device);
+		candidates.insert(std::make_pair(score, device));
 	}
 
-	// If we didn't find a suitable device, throw
-	if (vkPhysicalDevice_ == VK_NULL_HANDLE) {
-		throw std::runtime_error("Failed to find suitable GPU");
+	// Check best candidate
+	if (candidates.rbegin()->first > 0) {
+		VkPhysicalDeviceProperties deviceProperties;
+		vkGetPhysicalDeviceProperties(candidates.rbegin()->second, &deviceProperties);
+
+		std::cout << "Selecting Device: " << deviceProperties.deviceName << std::endl;
+
+		vkPhysicalDevice_ = candidates.rbegin()->second;
 	}
+	else {
+		throw std::runtime_error("Failed to find a suitable GPU");
+	}
+}
+
+int HelloTriangleApplication::rateDeviceSuitability(VkPhysicalDevice device) {
+	// Query the device properties
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+	// Query the device features
+	VkPhysicalDeviceFeatures deviceFeatures;
+	vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+	
+	// Score of the device
+	int score = 0;
+
+	// Discrete GPUs are desireable
+	if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+		score += 1000;
+	}
+
+	// Max size for textures
+	score += deviceProperties.limits.maxImageDimension2D;
+
+	// Application can't run without shaders
+	if (!deviceFeatures.geometryShader)
+		return 0;
+
+	return score;
+}
+
+// Finding queue families
+QueueFamilyIndices HelloTriangleApplication::findQueueFamilies(VkPhysicalDevice device) {
+	// Create a structure for the indices
+	QueueFamilyIndices indices;
+
+	// Find the queue families
+	uint32_t queueFamilyCount = 0;
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+	// Find one family that supports graphics
+	int i = 0;
+	for (const auto& queueFamily : queueFamilies) {
+		// We want the graphics bit
+		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+			indices.graphicsFamily = i;
+		}
+
+		// If we already found the graphics bit, break from loop
+		if (indices.isComplete())
+			break;
+
+		i++;
+	}
+
+	return indices;
+}
+
+void HelloTriangleApplication::createLogicalDevice() {
+	// Get the queue families
+	QueueFamilyIndices indices = findQueueFamilies(vkPhysicalDevice_);
+
+	// Now fill a structure for creating the device
+	VkDeviceQueueCreateInfo queueCreateInfo{};
+	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+	queueCreateInfo.queueCount = 1;
+
+	// Set the priority of command buffer execution
+	float queuePriority = 1.0f;
+	queueCreateInfo.pQueuePriorities = &queuePriority;
+
+	// Define device features. We will come back to this later
+	VkPhysicalDeviceFeatures deviceFeatures{};
+	
+	// Now moving on to creating the actual logical device
+	VkDeviceCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+	// Specify the queue creation info and what features to enable
+	createInfo.pQueueCreateInfos = &queueCreateInfo;
+	createInfo.queueCreateInfoCount = 1;
+	createInfo.pEnabledFeatures = &deviceFeatures;
+
+	// Specify any extensions and validation layers
+	createInfo.enabledExtensionCount = 0;
+	if (enableValidationLayers) {
+		createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+		createInfo.ppEnabledLayerNames = validationLayers.data();
+	}
+	else {
+		createInfo.enabledLayerCount = 0;
+	}
+
+	// Now create the device
+	if (vkCreateDevice(vkPhysicalDevice_, &createInfo, nullptr, &logicalDevice_) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create logical device!");
+
+	// Get the graphics queue from the device
+	vkGetDeviceQueue(logicalDevice_, indices.graphicsFamily.value(), 0, &graphicsQueue_);
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

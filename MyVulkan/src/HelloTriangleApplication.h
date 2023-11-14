@@ -13,6 +13,16 @@
 #include <GLFW/glfw3.h>
 
 #include <vector>
+#include <optional>
+
+// Struct for Queue Families
+struct QueueFamilyIndices {
+	std::optional<uint32_t> graphicsFamily;
+
+	bool isComplete() {
+		return graphicsFamily.has_value();
+	}
+};
 
 class HelloTriangleApplication {
 public:
@@ -34,6 +44,9 @@ private:
 	void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
 	bool isDeviceSuitable(VkPhysicalDevice device);
 	void pickPhysicalDevice();
+	int rateDeviceSuitability(VkPhysicalDevice device);
+	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
+	void createLogicalDevice();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -49,4 +62,8 @@ private:
 	VkDebugUtilsMessengerEXT debugMessenger_; //!< Debug Messenger for debug callbacks
 
 	VkPhysicalDevice vkPhysicalDevice_ = VK_NULL_HANDLE; //!< The physical device Vulkan will use to render
+
+	VkDevice logicalDevice_; //!< The logical device for Vulkan
+
+	VkQueue graphicsQueue_; //!< The queue for graphics commands
 };

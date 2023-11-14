@@ -9,6 +9,8 @@
 
 #pragma once
 
+// Note: GLFW provides a create surface function for each platform
+//  we will use their function, but understand the different ways to do it
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -18,9 +20,10 @@
 // Struct for Queue Families
 struct QueueFamilyIndices {
 	std::optional<uint32_t> graphicsFamily;
+	std::optional<uint32_t> presentFamily;
 
 	bool isComplete() {
-		return graphicsFamily.has_value();
+		return graphicsFamily.has_value() && presentFamily.has_value();
 	}
 };
 
@@ -47,6 +50,7 @@ private:
 	int rateDeviceSuitability(VkPhysicalDevice device);
 	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
 	void createLogicalDevice();
+	void createSurface();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -54,6 +58,8 @@ private:
 		VkDebugUtilsMessageTypeFlagsEXT messageType,
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 		void* pUserData);
+
+	VkSurfaceKHR surface_; //!< The rendering surface
 
 	// Private variables
 	GLFWwindow* window_;    //!< The GLFW Window
@@ -66,4 +72,5 @@ private:
 	VkDevice logicalDevice_; //!< The logical device for Vulkan
 
 	VkQueue graphicsQueue_; //!< The queue for graphics commands
+	VkQueue presentQueue_;  //!< Presentation queue
 };

@@ -96,6 +96,9 @@ void HelloTriangleApplication::initVulkan() {
 	
 	// Create a swap chain
 	createSwapChain();
+
+	// Create the image viewers
+	createImageViews();
 }
 
 // Create the vulkan instance
@@ -218,6 +221,11 @@ void HelloTriangleApplication::mainloop() {
 void HelloTriangleApplication::cleanup() {
 	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
 	//	so we don't need to worry about it
+
+	// Clean up the image views
+	for (auto imageView : swapChainImageViews_) {
+		vkDestroyImageView(logicalDevice_, imageView, nullptr);
+	}
 
 	// Destroy the swapchain
 	vkDestroySwapchainKHR(logicalDevice_, swapChain_, nullptr);
@@ -619,6 +627,44 @@ void HelloTriangleApplication::createSwapChain() {
 	// Don't forget to save the format and the chain extent
 	swapChainImageFormat_ = surfaceFormat.format;
 	swapChainExtent_ = extents;
+}
+
+void HelloTriangleApplication::createImageViews() {
+	// Start with resizing the vector to how many images are in the swapchain
+	swapChainImageViews_.resize(swapChainImages_.size());
+
+	// Iterate over the swap chain images
+	for (size_t i = 0; i < swapChainImages_.size(); ++i) {
+		// Start a creation structure for an image view object
+		VkImageViewCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		createInfo.image = swapChainImages_[i];
+
+		// Specify view type and give format from swap chain
+		// View Type will almost always be 2D textures
+		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		createInfo.format = swapChainImageFormat_;
+
+		// Components lets you swizzle the colors around.
+		// Stick with default mapping
+		createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+		// Subresource Range is the purpose of the image.
+		// Used as color targets with no mipmapping levels or multiple layers
+		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		createInfo.subresourceRange.baseMipLevel = 0;
+		createInfo.subresourceRange.levelCount = 1;
+		createInfo.subresourceRange.baseArrayLayer = 0;
+		createInfo.subresourceRange.layerCount = 1;
+
+		// Now call the create function for the object
+		if (vkCreateImageView(logicalDevice_, &createInfo, nullptr, &swapChainImageViews_[i]) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create image views!");
+		}
+	}
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

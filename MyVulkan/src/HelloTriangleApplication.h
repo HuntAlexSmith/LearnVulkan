@@ -64,6 +64,7 @@ private:
 	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
 	void createSwapChain();
+	void createImageViews();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -89,7 +90,8 @@ private:
 
 	VkSwapchainKHR swapChain_; //!< Member variable for the swap chain
 
-	std::vector<VkImage> swapChainImages_; //!< Vector of the swap chain images
+	std::vector<VkImage> swapChainImages_;         //!< Vector of the swap chain images
+	std::vector<VkImageView> swapChainImageViews_; //!< Vector of the swap chain image views
 
 	VkFormat swapChainImageFormat_; //!< Image format of the swap chain
 	VkExtent2D swapChainExtent_;    //!< The extent of the swap chain

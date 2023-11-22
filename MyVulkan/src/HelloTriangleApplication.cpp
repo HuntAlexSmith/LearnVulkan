@@ -610,6 +610,15 @@ void HelloTriangleApplication::createSwapChain() {
 	if (vkCreateSwapchainKHR(logicalDevice_, &createInfo, nullptr, &swapChain_) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create swap chain!");
 	}
+
+	// With the swapchain created, get the handles of the images in the swapchain
+	vkGetSwapchainImagesKHR(logicalDevice_, swapChain_, &imageCount, nullptr);
+	swapChainImages_.resize(imageCount);
+	vkGetSwapchainImagesKHR(logicalDevice_, swapChain_, &imageCount, swapChainImages_.data());
+
+	// Don't forget to save the format and the chain extent
+	swapChainImageFormat_ = surfaceFormat.format;
+	swapChainExtent_ = extents;
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

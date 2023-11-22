@@ -12,6 +12,9 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <cstdint>
+#include <limits>
+#include <algorithm>
 
 // Window const sizes
 const uint32_t WIDTH = 800;
@@ -20,6 +23,11 @@ const uint32_t HEIGHT = 600;
 // Vulkan validation layers
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
+};
+
+// Vulkan device extensions. Define required extensions of a device
+const std::vector<const char*> deviceExtensions = {
+	VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
 // Macros for if the validation layers are on or off
@@ -85,6 +93,9 @@ void HelloTriangleApplication::initVulkan() {
 
 	// Create a logical device
 	createLogicalDevice();
+	
+	// Create a swap chain
+	createSwapChain();
 }
 
 // Create the vulkan instance
@@ -208,6 +219,9 @@ void HelloTriangleApplication::cleanup() {
 	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
 	//	so we don't need to worry about it
 
+	// Destroy the swapchain
+	vkDestroySwapchainKHR(logicalDevice_, swapChain_, nullptr);
+
 	// Don't forget to destroy the logical device
 	vkDestroyDevice(logicalDevice_, nullptr);
 
@@ -242,7 +256,39 @@ bool HelloTriangleApplication::isDeviceSuitable(VkPhysicalDevice device) {
 	// Check the queue families and see if the device is suitable
 	QueueFamilyIndices indices = findQueueFamilies(device);
 
-	return indices.isComplete();
+	// Also get if the needed extensions are supported
+	bool extensionsSupported = checkDeviceExtensionSupport(device);
+
+	// Check if the device has good enough swap chain support
+	bool swapChainAdequate = false;
+	if (extensionsSupported) {
+		// Check that the swap chain has actual formats and presentation modes
+		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+		swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+	}
+
+	// Check that everything here is good
+	return indices.isComplete() && extensionsSupported && swapChainAdequate;
+}
+
+bool HelloTriangleApplication::checkDeviceExtensionSupport(VkPhysicalDevice device) {
+	// Get all the available extensions of this device
+	uint32_t extensionCount;
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+	std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+	// Create a set of all the required extensions
+	std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+	// Iterate over all the available extensions and remove from the set any that match
+	for (const auto& extension : availableExtensions) {
+		requiredExtensions.erase(extension.extensionName);
+	}
+
+	// If set is empty, all extensions supported
+	return requiredExtensions.empty();
 }
 
 // Function to help Vulkan pick a physical device
@@ -375,7 +421,7 @@ void HelloTriangleApplication::createLogicalDevice() {
 	createInfo.pQueueCreateInfos = queueCreateInfos.data();
 	createInfo.pEnabledFeatures = &deviceFeatures;
 
-	// Specify any extensions and validation layers
+	// Specify any alidation layers
 	createInfo.enabledExtensionCount = 0;
 	if (enableValidationLayers) {
 		createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
@@ -384,6 +430,10 @@ void HelloTriangleApplication::createLogicalDevice() {
 	else {
 		createInfo.enabledLayerCount = 0;
 	}
+
+	// Specify any extensions
+	createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+	createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
 	// Now create the device
 	if (vkCreateDevice(vkPhysicalDevice_, &createInfo, nullptr, &logicalDevice_) != VK_SUCCESS)
@@ -397,6 +447,168 @@ void HelloTriangleApplication::createLogicalDevice() {
 void HelloTriangleApplication::createSurface() {
 	if (glfwCreateWindowSurface(vkInstance_, window_, nullptr, &surface_) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create window surface.");
+	}
+}
+
+SwapChainSupportDetails HelloTriangleApplication::querySwapChainSupport(VkPhysicalDevice device) {
+	// Get swap chain support details 
+	SwapChainSupportDetails details;
+
+	// Get surface capabilities
+	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface_, &details.capabilities);
+
+	// Get the supported surface formats
+	uint32_t formatCount;
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface_, &formatCount, nullptr);
+	if (formatCount != 0) {
+		details.formats.resize(formatCount);
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface_, &formatCount, details.formats.data());
+	}
+
+	// Get the supported presentation modes
+	uint32_t presentModeCount;
+	vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface_, &presentModeCount, nullptr);
+	if (presentModeCount != 0) {
+		details.presentModes.resize(presentModeCount);
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface_, &presentModeCount, details.presentModes.data());
+	}
+
+	// Return all the polled details
+	return details;
+}
+
+// Select the swap chain format
+VkSurfaceFormatKHR HelloTriangleApplication::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
+	// Iterating over all the available formats, choose the first one that:
+	// Supports BGRA 32-bit and Supports SRGB
+	for (const auto& format : availableFormats) {
+		if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+			return format;
+		}
+	}
+
+	// If it isn't found, just return the first available format
+	return availableFormats[0];
+}
+
+// Select the presentation mode
+VkPresentModeKHR HelloTriangleApplication::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+	// Four different kinds of presentation modes:
+	// Immediate
+	// FIFO
+	// FIFO relaxed
+	// mailbox (triple buffering)
+	// Ideal is mailbox if energy consumption is not a concern
+
+	// Find that one of the available modes is mailbox.
+	for (const auto& mode : availablePresentModes) {
+		if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+			return mode;
+		}
+	}
+
+	// Otherwise, FIFO is guaranteed
+	return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+// Select the swap extent
+VkExtent2D HelloTriangleApplication::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
+	// Resolution of swap chain images, usually equal to resolution of the window
+	// we are drawing to in pixels
+
+	// If the width is not max, the resolution is already specified
+	if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+		return capabilities.currentExtent;
+	}
+
+	// Otherwise, we need to figure out the extent ourselves.
+	// Get the width and heigh of the window glfw created
+	int width, height;
+	glfwGetFramebufferSize(window_, &width, &height);
+
+	VkExtent2D actualExtent = {
+		static_cast<uint32_t>(width),
+		static_cast<uint32_t>(height)
+	};
+
+	// Don't forget to clamp the width and height based on min and max image extents
+	actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+	actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+	// Return the newly calculated extent
+	return actualExtent;
+}
+
+// Create a swap chain
+void HelloTriangleApplication::createSwapChain() {
+	// Get swap chain support details
+	SwapChainSupportDetails swapChainSupport = querySwapChainSupport(vkPhysicalDevice_);
+
+	// Figure out what surface format, presentation mode, and extents we will use
+	VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
+	VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+	VkExtent2D extents = chooseSwapExtent(swapChainSupport.capabilities);
+
+	// Also figure out how many images will be in the swap chain
+	// recommended to always get one more than the minimum
+	uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+
+	// Also make sure the maximum is not being exceeded
+	// (A maximum of zero means no limit)
+	if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
+		imageCount = swapChainSupport.capabilities.maxImageCount;
+	}
+
+	// Now to start creating the swap chain creation struct
+	VkSwapchainCreateInfoKHR createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	createInfo.surface = surface_;
+
+	// details of the swap chain
+	createInfo.minImageCount = imageCount;
+	createInfo.imageFormat = surfaceFormat.format;
+	createInfo.imageColorSpace = surfaceFormat.colorSpace;
+	createInfo.imageExtent = extents;
+
+	// This value is almost always one, unless there are special cases
+	createInfo.imageArrayLayers = 1;
+
+	// Rendering directly to these images, so used as color attachments
+	// Other options that may be useful
+	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+	QueueFamilyIndices indices = findQueueFamilies(vkPhysicalDevice_);
+	uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
+	// Specify how to handle swap chain images across multiple queue families
+	// Setting up concurrent so that we don't need to set up ownership stuff.
+	if (indices.graphicsFamily != indices.presentFamily) {
+		createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+		createInfo.queueFamilyIndexCount = 2;
+		createInfo.pQueueFamilyIndices = queueFamilyIndices;
+	}
+	else {
+		createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		createInfo.queueFamilyIndexCount = 0;     // Optional
+		createInfo.pQueueFamilyIndices = nullptr; // Optional
+	}
+
+	// Transformations can be applied to the images if desired. We don't want this, so set to itself
+	createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+
+	// don't use alpha for blending between windows. Ignore the alpha then
+	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
+	// Set the presentation mode and clip pixels that can't be seen
+	createInfo.presentMode = presentMode;
+	createInfo.clipped = VK_TRUE;
+	
+	// Null for now, but needs to be handled if the screen is resized
+	createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+	// Now try to create the swapchain
+	if (vkCreateSwapchainKHR(logicalDevice_, &createInfo, nullptr, &swapChain_) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create swap chain!");
 	}
 }
 

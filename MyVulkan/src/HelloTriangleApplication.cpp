@@ -99,6 +99,9 @@ void HelloTriangleApplication::initVulkan() {
 
 	// Create the image viewers
 	createImageViews();
+
+	// Create a graphics pipeline
+	createGraphicsPipeline();
 }
 
 // Create the vulkan instance
@@ -665,6 +668,10 @@ void HelloTriangleApplication::createImageViews() {
 			throw std::runtime_error("Failed to create image views!");
 		}
 	}
+}
+
+void HelloTriangleApplication::createGraphicsPipeline() {
+
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

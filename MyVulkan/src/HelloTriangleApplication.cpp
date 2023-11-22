@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <algorithm>
+#include <fstream>
 
 // Window const sizes
 const uint32_t WIDTH = 800;
@@ -36,6 +37,29 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
+
+// Helper function for reading binary files
+static std::vector<char> readFile(const std::string& filename) {
+	// Open the filename in a binary format (ate - read from end of file)
+	std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+	// If the file is not open, throw
+	if (!file.is_open()) {
+		throw std::runtime_error("Failed to Open File!");
+	}
+
+	// Get what the file size is and create a buffer with the file info
+	size_t fileSize = (size_t)file.tellg();
+	std::vector<char> buffer(fileSize);
+
+	// Now go back to the beginning and read in all the data
+	file.seekg(0);
+	file.read(buffer.data(), fileSize);
+
+	// Remember to close the file and return the buffer
+	file.close();
+	return buffer;
+}
 
 // Function for creating debug messenger (checks if the layer is available or not)
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
@@ -671,7 +695,64 @@ void HelloTriangleApplication::createImageViews() {
 }
 
 void HelloTriangleApplication::createGraphicsPipeline() {
+	// Pull the code 
+	auto vertShaderCode = readFile("data/shaders/vert.spv");
+	auto fragShaderCode = readFile("data/shaders/frag.spv");
 
+	// Create the shader modules
+	VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+	VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+	// Creation info for the vertex stage
+	VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+	vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vertShaderStageInfo.module = vertShaderModule;
+	vertShaderStageInfo.pName = "main"; // Entrypoint of the shader
+	// pSpecializationInfo allows specifying values for shader constants
+
+	// Creation info for the fragment stage
+	VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+	fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragShaderStageInfo.module = fragShaderModule;
+	fragShaderStageInfo.pName = "main"; // Entrypoint of the shader
+
+	// Now create an array with these shader stages
+	VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+	//****************************************************************************
+	//	Dynamic State Creation information
+	//****************************************************************************
+	std::vector<VkDynamicState> dynamicStates = {
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+	VkPipelineDynamicStateCreateInfo dynamicState{};
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+	dynamicState.pDynamicStates = dynamicStates.data();
+	
+	// Don't forget to destroy the shader modules
+	vkDestroyShaderModule(logicalDevice_, fragShaderModule, nullptr);
+	vkDestroyShaderModule(logicalDevice_, vertShaderModule, nullptr);
+}
+
+VkShaderModule HelloTriangleApplication::createShaderModule(const std::vector<char>& code) {
+	// Start the creation information of the shader module
+	VkShaderModuleCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	createInfo.codeSize = code.size();
+	createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+	// Create the shader module
+	VkShaderModule shaderModule;
+	if (vkCreateShaderModule(logicalDevice_, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create shader module!");
+	}
+
+	// Return the shader module
+	return shaderModule;
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

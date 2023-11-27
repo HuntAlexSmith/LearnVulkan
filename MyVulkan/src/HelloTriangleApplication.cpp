@@ -732,6 +732,102 @@ void HelloTriangleApplication::createGraphicsPipeline() {
 	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 	dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
 	dynamicState.pDynamicStates = dynamicStates.data();
+
+	//****************************************************************************
+	//	Vertex Input State Creation information
+	//****************************************************************************
+	VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+	// Spacing between data and whether data is per-vertex or per-instance (instancing)
+	vertexInputInfo.vertexBindingDescriptionCount = 0;
+	vertexInputInfo.pVertexBindingDescriptions = nullptr;   // Optional
+
+	// Type of attributes passed to vertex shader, what binding they associate to, and at which offset.
+	vertexInputInfo.vertexAttributeDescriptionCount = 0;
+	vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+
+	//****************************************************************************
+	//	Input Assembly State Creation information
+	//****************************************************************************
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+
+	// What kind of geometry will be drawn. Examples: Point List, Line List, Line Strip, triangle list, triangle strip, etc.
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+	// if true, can break up inputs for the Strip topologies
+	inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+	//****************************************************************************
+	//	Viewports and Scissors
+	//****************************************************************************
+	VkViewport viewport{};
+	
+	// These will almost always be the values for a viewport
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = (float) swapChainExtent_.width;
+	viewport.height = (float)swapChainExtent_.height;
+
+	// These must always be between 0 and 1
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+
+	// Scissor will discard any pixels outside of a range
+	VkRect2D scissor{};
+	scissor.offset = { 0, 0 };
+	scissor.extent = swapChainExtent_;
+
+	// We can make viewport and scissors static or dynamic. Dynamic is more desireable, but will be static for now
+	VkPipelineViewportStateCreateInfo viewportState{};
+	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount = 1;
+	viewportState.pViewports = &viewport;
+	viewportState.scissorCount = 1;
+	viewportState.pScissors = &scissor;
+
+	//****************************************************************************
+	//	Rasterizer
+	//		Vertex to Fragment. Runs Depth tests, face culling, and scissor test.
+	//		Can also output fragments that fill entire polys or just edges, like
+	//			wireframe rendering.
+	//****************************************************************************
+	VkPipelineRasterizationStateCreateInfo rasterizer{};
+	rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+
+	// If true, fragments outside near and far planes are clamped instead of discarded
+	// Useful for shadow maps. Required a GPU feature to be enabled
+	rasterizer.depthClampEnable = VK_FALSE;
+
+	// If true, geometry never passed through rasterizer stage. Essentially disabled output to framebuffer
+	rasterizer.rasterizerDiscardEnable = VK_FALSE;
+
+	// How fragments are generated for geometry. Modes available are:
+	//	Fill - fill area of polygon with fragments
+	//	Line - polygon edges are drawn as lines
+	//	Point - polygon vertices are drawn as points
+	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+
+	// Straight forward. Any line thicker than 1.0f required wideLines GPU feature enabled
+	rasterizer.lineWidth = 1.0f;
+
+	// Cull mode and what the rasterizer considered front facing
+	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+	// TODO: THIS SHOULD BE COUNTER CLOCK-WISE. RIGHT HAND RULE!!!
+	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+	// Rasterizer can change depth values by biasing them with constant values
+	//	or biasing them based on a fragment's slope
+	rasterizer.depthBiasEnable = VK_FALSE;
+	rasterizer.depthBiasConstantFactor = 0.0f; // Optional
+	rasterizer.depthBiasClamp = 0.0f; // Optional
+	rasterizer.depthBiasSlopeFactor = 0.0f; // Optional;
+
+	//****************************************************************************
+	//	Multisampling (TODO:)
+	//****************************************************************************
+
 	
 	// Don't forget to destroy the shader modules
 	vkDestroyShaderModule(logicalDevice_, fragShaderModule, nullptr);

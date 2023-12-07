@@ -252,6 +252,14 @@ void HelloTriangleApplication::cleanup() {
 	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
 	//	so we don't need to worry about it
 
+	// Destroy the frame buffers
+	for (auto framebuffer : swapChainFramebuffers_) {
+		vkDestroyFramebuffer(logicalDevice_, framebuffer, nullptr);
+	}
+
+	// Destroy the graphics pipeline
+	vkDestroyPipeline(logicalDevice_, gfxPipeline_, nullptr);
+
 	// Destroy the pipeline layout
 	vkDestroyPipelineLayout(logicalDevice_, pipelineLayout_, nullptr);
 
@@ -924,6 +932,45 @@ void HelloTriangleApplication::createGraphicsPipeline() {
 	if (vkCreatePipelineLayout(logicalDevice_, &pipelineLayoutInfo, nullptr, &pipelineLayout_) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create pipeline layout!");
 	}
+
+	//****************************************************************************
+	//	Graphics Pipeline
+	//		Now that we have everything set up, we can actually create a
+	//		graphics pipeline
+	//****************************************************************************
+	VkGraphicsPipelineCreateInfo pipelineInfo{};
+	pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+
+	// Specify how many shader stages there will be
+	pipelineInfo.stageCount = 2;
+	pipelineInfo.pStages = shaderStages;
+
+	// Specify all the fixed functions
+	pipelineInfo.pVertexInputState = &vertexInputInfo;
+	pipelineInfo.pInputAssemblyState = &inputAssembly;
+	pipelineInfo.pViewportState = &viewportState;
+	pipelineInfo.pRasterizationState = &rasterizer;
+	pipelineInfo.pMultisampleState = &multisampling;
+	pipelineInfo.pDepthStencilState = nullptr; // Optional
+	pipelineInfo.pColorBlendState = &colorBlending;
+	pipelineInfo.pDynamicState = &dynamicState;
+
+	// Specify the pipeline layout (uniform variables)
+	pipelineInfo.layout = pipelineLayout_;
+
+	// Specify the render pass and subpasses
+	pipelineInfo.renderPass = renderPass_;
+	pipelineInfo.subpass = 0; // Index of the subpass
+
+	// This allows for deriving a pipeline from a base pipeline
+	// Also only used if VK_PIPELINE_CREATE_DERIVATIVE_BIT flag is specified in create info
+	pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+	pipelineInfo.basePipelineIndex = -1; // Optional
+
+	// Now create the graphics pipeline
+	if (vkCreateGraphicsPipelines(logicalDevice_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &gfxPipeline_) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create Graphics Pipeline!");
+	}
 	
 	// Don't forget to destroy the shader modules
 	vkDestroyShaderModule(logicalDevice_, fragShaderModule, nullptr);
@@ -1036,6 +1083,44 @@ void HelloTriangleApplication::createRenderPass() {
 
 	if (vkCreateRenderPass(logicalDevice_, &renderPassInfo, nullptr, &renderPass_) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create render pass!");
+	}
+}
+
+//*****************************************************************************
+//	Creation of frame buffers
+//*****************************************************************************
+void HelloTriangleApplication::createFramebuffers() {
+	// Resize container 
+	swapChainFramebuffers_.resize(swapChainImageViews_.size());
+
+	// Iterate over the image views and make framebuffers for them
+	for (size_t i = 0; i < swapChainImageViews_.size(); ++i) {
+		// Array for the frame buffer to know that vk images they should be bound to
+		VkImageView attachments[] = {
+			swapChainImageViews_[i]
+		};
+
+		// Creation struct for a frame buffer
+		VkFramebufferCreateInfo framebufferInfo{};
+		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+
+		// Needs to know what render pass it is using
+		framebufferInfo.renderPass = renderPass_;
+
+		// How many attachments is this frame buffer using
+		framebufferInfo.attachmentCount = 1;
+		framebufferInfo.pAttachments = attachments;
+
+		// Width and height of the framebuffer
+		framebufferInfo.width = swapChainExtent_.width;
+		framebufferInfo.height = swapChainExtent_.height;
+
+		// Images in swapchain are single images, so layers is one
+		framebufferInfo.layers = 1;
+
+		if (vkCreateFramebuffer(logicalDevice_, &framebufferInfo, nullptr, &swapChainFramebuffers_[i]) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create Framebuffer!");
+		}
 	}
 }
 

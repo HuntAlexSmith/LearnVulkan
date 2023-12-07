@@ -68,6 +68,7 @@ private:
 	void createGraphicsPipeline();
 	VkShaderModule createShaderModule(const std::vector<char>& code);
 	void createRenderPass();
+	void createFramebuffers();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -101,4 +102,8 @@ private:
 
 	VkRenderPass renderPass_; //!< The render pass
 	VkPipelineLayout pipelineLayout_; //!< The pipeline layout (uniform variables)
+
+	VkPipeline gfxPipeline_; //!< The actual rendering pipeline
+
+	std::vector<VkFramebuffer> swapChainFramebuffers_; //!< The Frame buffers in the swap chain
 };

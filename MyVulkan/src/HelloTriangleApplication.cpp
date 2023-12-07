@@ -124,6 +124,9 @@ void HelloTriangleApplication::initVulkan() {
 	// Create the image viewers
 	createImageViews();
 
+	// Create a render pass
+	createRenderPass();
+
 	// Create a graphics pipeline
 	createGraphicsPipeline();
 }
@@ -248,6 +251,12 @@ void HelloTriangleApplication::mainloop() {
 void HelloTriangleApplication::cleanup() {
 	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
 	//	so we don't need to worry about it
+
+	// Destroy the pipeline layout
+	vkDestroyPipelineLayout(logicalDevice_, pipelineLayout_, nullptr);
+
+	// Destroy the render passs
+	vkDestroyRenderPass(logicalDevice_, renderPass_, nullptr);
 
 	// Clean up the image views
 	for (auto imageView : swapChainImageViews_) {
@@ -825,9 +834,96 @@ void HelloTriangleApplication::createGraphicsPipeline() {
 	rasterizer.depthBiasSlopeFactor = 0.0f; // Optional;
 
 	//****************************************************************************
-	//	Multisampling (TODO:)
+	//	Multisampling
+	//		Helps with Anti-Aliasing. Combines fragment shader results of
+	//		multiple polygons that rasterize to same pixel.
+	// 
+	//		We will return to this later
+	//****************************************************************************
+	VkPipelineMultisampleStateCreateInfo multisampling{};
+	multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+
+	multisampling.sampleShadingEnable = VK_FALSE;
+	multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampling.minSampleShading = 1.0f; // Optional
+	multisampling.pSampleMask = nullptr; // Optional
+	multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
+	multisampling.alphaToOneEnable = VK_FALSE; // Optional
+
+	//****************************************************************************
+	//	Depth and Stencil Testing
+	//		We will return to this later
 	//****************************************************************************
 
+	//****************************************************************************
+	//	Color Blending
+	//		Returned color from fragment shader needs to be combined with the
+	//		color already in the FrameBuffer. Two ways to do this:
+	//			1. Mix old and new value for a final color
+	//			2. Combine the old and new value using a bitwise operation
+	//		There are also two struct types for color blending:
+	//			1. Attachment State, which configures per each frame buffer.
+	//			2. CreateInfo, which configured global color blending
+	//****************************************************************************
+
+	// We only have one Frame Buffer, so we will create one Attachment State
+	VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+	colorBlendAttachment.colorWriteMask =
+		VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+	// Pseudo code of how the blending works:
+	/*
+		if (blendEnable) {
+			finalColor.rgb = (srcColorBlendFactor * newColor.rgb) < colorBlendOp > (dstColorBlendFactor * oldColor.rgb);
+			finalColor.a = (srcAlphaBlendFactor * newColor.a) < alphaBlendOp > (dstAlphaBlendFactor * oldColor.a);
+		}
+		else {
+			finalColor = newColor;
+		}
+
+		finalColor = finalColor & colorWriteMask;
+	*/
+	// This implements alpha blending
+	colorBlendAttachment.blendEnable = VK_TRUE;
+	colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;           // Optional | Factor of using the new color
+	colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA; // Optional | Factor of using the old color
+	colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD; // Optional | What operation to do when blending the colors
+	colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;  // Optional | Factor of using the new alpha
+	colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional | Factor of using the old alpha
+	colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional | What operation to do when blending the alpha
+
+	// Now we create the actual blend state
+	VkPipelineColorBlendStateCreateInfo colorBlending{};
+	colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+
+	// Allows the use of bitwise combination for blending. 
+	// Note: If enabled, will treat blendEnable as VK_FALSE
+	colorBlending.logicOpEnable = VK_FALSE;
+	colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
+
+	colorBlending.attachmentCount = 1;
+	colorBlending.pAttachments = &colorBlendAttachment;
+	colorBlending.blendConstants[0] = 0.0f; // Optional
+	colorBlending.blendConstants[1] = 0.0f; // Optional
+	colorBlending.blendConstants[2] = 0.0f; // Optional
+	colorBlending.blendConstants[3] = 0.0f; // Optional
+
+	//****************************************************************************
+	//	Pipeline Layout
+	//		Uniform variables must be specified at creation time of a pipeline
+	//		Even if you don't have uniform variables, you are required to create
+	//		this layout
+	//****************************************************************************
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount = 0; // Optional
+	pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+	pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
+	pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
+
+	if (vkCreatePipelineLayout(logicalDevice_, &pipelineLayoutInfo, nullptr, &pipelineLayout_) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create pipeline layout!");
+	}
 	
 	// Don't forget to destroy the shader modules
 	vkDestroyShaderModule(logicalDevice_, fragShaderModule, nullptr);
@@ -849,6 +945,98 @@ VkShaderModule HelloTriangleApplication::createShaderModule(const std::vector<ch
 
 	// Return the shader module
 	return shaderModule;
+}
+
+//*****************************************************************************
+//	Create Render Pass
+//		Tell Vulkan about the framebuffer attachments that will be used
+//		while rendering.
+//		- How many color buffers
+//		- How many depth buffers
+//		- How many samples for each
+//		- How to handle contents through rendering
+//*****************************************************************************
+void HelloTriangleApplication::createRenderPass() {
+	//****************************************************************************
+	//	Color Attachment
+	//		Describe the color attachment in the render pass
+	//****************************************************************************
+	VkAttachmentDescription colorAttachment{};
+	colorAttachment.format = swapChainImageFormat_;
+	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+
+	// What to do with the data in attachment before rendering:
+	//	LOAD - Preserve existing contents of attachment
+	//	CLEAR - Clear values to a constant
+	//	DONT_CARE - Existing contents undefined
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+
+	// What to do with the data in attachment after rendering
+	//	STORE - Rendered contents stored in memory and can be read later
+	//	DONT_CARE - Contents of framebuffer undefined after rendering operation
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+	// Applies to stencil data. Since we are not using stencil, don't care.
+	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+	// Layout of pixels in memory can change based on what you are doing with an image
+	// Common Layouts:
+	//	COLOR_ATTACHMENT_OPTIMAL - Image is used as a color attachment
+	//	PRESENT_SRC_KHR - Image is presented in the swap chain
+	//	TRANSFER_DST_OPTIMAL - Image is used as destination for memory copy operation
+
+	// Layout of the image before render pass starts
+	// We don't care what the image layout was before, so UNDEFINED
+	// Undefined does mean that contents are not guaranteed to be preserved, but we are clearing it anyways
+	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	// Layout of the image after render pass
+	// We want the image to be ready for presentation, so PRESENT_SRC_KHR
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+	//****************************************************************************
+	//	Subpasses & Attachment Refs.
+	//		A renderpass can have multiple subpasses, like post-processing
+	//		that happens one after another. 
+	// 
+	//		Just one subpass for our triangle
+	//****************************************************************************
+
+	// Each subpass references one or more attachments
+	VkAttachmentReference colorAttachmentRef{};
+	colorAttachmentRef.attachment = 0; // We only have one attachment, so index is zero
+	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // Attachment is a color buffer
+
+	// Subpass Description, make sure it is known as a graphics subpass
+	VkSubpassDescription subpass{};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+	// Reference the color attachment
+	// Fragment shader refers to the attachment location in the shader! (out vec4 outColor)
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorAttachmentRef;
+
+	// Other attachments that can be referenced by a subpass include:
+	//	pInputAttachments - Attachments read from a shader
+	//	pResolveAttachments - used for multisampling color attachments
+	//	pDepthStencilAttachment - from depth and stencil data
+	//	pPreserveAttachments - not used by this subpass, but data must be preserved
+
+	//****************************************************************************
+	//	Render Pass
+	//		Now with everything specified, we can create the render pass
+	//****************************************************************************
+	VkRenderPassCreateInfo renderPassInfo{};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassInfo.attachmentCount = 1;
+	renderPassInfo.pAttachments = &colorAttachment;
+	renderPassInfo.subpassCount = 1;
+	renderPassInfo.pSubpasses = &subpass;
+
+	if (vkCreateRenderPass(logicalDevice_, &renderPassInfo, nullptr, &renderPass_) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create render pass!");
+	}
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

@@ -67,6 +67,7 @@ private:
 	void createImageViews();
 	void createGraphicsPipeline();
 	VkShaderModule createShaderModule(const std::vector<char>& code);
+	void createRenderPass();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -97,4 +98,7 @@ private:
 
 	VkFormat swapChainImageFormat_; //!< Image format of the swap chain
 	VkExtent2D swapChainExtent_;    //!< The extent of the swap chain
+
+	VkRenderPass renderPass_; //!< The render pass
+	VkPipelineLayout pipelineLayout_; //!< The pipeline layout (uniform variables)
 };

@@ -5,6 +5,8 @@
 *	@brief
 *		HelloTriangleApplication that will handle all of the Vulkan and
 *		GLFW calls for getting a triangle on screen
+* 
+*		All code is referenced from: https://vulkan-tutorial.com/
 ******************************************************************************/
 
 #pragma once
@@ -69,6 +71,9 @@ private:
 	VkShaderModule createShaderModule(const std::vector<char>& code);
 	void createRenderPass();
 	void createFramebuffers();
+	void createCommandPool();
+	void createCommandBuffer();
+	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -106,4 +111,8 @@ private:
 	VkPipeline gfxPipeline_; //!< The actual rendering pipeline
 
 	std::vector<VkFramebuffer> swapChainFramebuffers_; //!< The Frame buffers in the swap chain
+
+	VkCommandPool commandPool_; //!< Pool for managing buffers and command buffers
+
+	VkCommandBuffer commandBuffer_; //!< Command buffer for the command pool
 };

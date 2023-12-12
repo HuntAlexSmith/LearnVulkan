@@ -4,6 +4,8 @@
 *	@date   11/05/2023
 *	@brief
 *		Implementation of the HelloTriangleApplication class
+* 
+*		All code is referenced from: https://vulkan-tutorial.com/
 ******************************************************************************/
 
 #include "HelloTriangleApplication.h"
@@ -129,6 +131,13 @@ void HelloTriangleApplication::initVulkan() {
 
 	// Create a graphics pipeline
 	createGraphicsPipeline();
+
+	// Create frame buffers
+	createFramebuffers();
+
+	// Create the command pool and a command buffer
+	createCommandPool();
+	createCommandBuffer();
 }
 
 // Create the vulkan instance
@@ -251,6 +260,9 @@ void HelloTriangleApplication::mainloop() {
 void HelloTriangleApplication::cleanup() {
 	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
 	//	so we don't need to worry about it
+
+	// Don't forget to destroy the command pool
+	vkDestroyCommandPool(logicalDevice_, commandPool_, nullptr);
 
 	// Destroy the frame buffers
 	for (auto framebuffer : swapChainFramebuffers_) {
@@ -1121,6 +1133,149 @@ void HelloTriangleApplication::createFramebuffers() {
 		if (vkCreateFramebuffer(logicalDevice_, &framebufferInfo, nullptr, &swapChainFramebuffers_[i]) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create Framebuffer!");
 		}
+	}
+}
+
+//*****************************************************************************
+//	Creation of command pool
+//*****************************************************************************
+void HelloTriangleApplication::createCommandPool() {
+	// We will need the queue family indices
+	QueueFamilyIndices queueFamilyIndices = findQueueFamilies(vkPhysicalDevice_);
+
+	// Creation structure
+	VkCommandPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+
+	// Two options:
+	//	TRANSIENT_BIT - Command buffers rerecorded with new commands very often
+	//	RESET_COMMAND_BUFFER_BIT - Command buffers rerecorded individually. Without flag, all reset together
+	poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	// Command buffers executed by submitting to one of the device queues.
+	// Going to record commands for drawing, so choose graphics queue family
+	poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+	// Actually create the command pool
+	if (vkCreateCommandPool(logicalDevice_, &poolInfo, nullptr, &commandPool_) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create command pool!");
+	}
+}
+
+//*****************************************************************************
+//	Creation of command buffer
+//*****************************************************************************
+void HelloTriangleApplication::createCommandBuffer() {
+	// Creation struct
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+
+	// Command buffer needs to allocate from a pool
+	allocInfo.commandPool = commandPool_;
+
+	// Two types:
+	//	PRIMARY - Can be submitted to a queue for execution, not not called from other command buffers
+	//	SECONDARY - Can't be submitted directly, but can be called from primary command buffers
+	// Useful for common operations that are always reused
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+	// We are only allocating one command buffer
+	allocInfo.commandBufferCount = 1;
+
+	// Now actually create the command buffer
+	if (vkAllocateCommandBuffers(logicalDevice_, &allocInfo, &commandBuffer_) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to allocate command buffers!");
+	}
+}
+
+//*****************************************************************************
+//	Record Command Buffer
+//		Writes commands we want to execute into a command buffer
+//*****************************************************************************
+void HelloTriangleApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	// Options are:
+	//	ONE_TIME_SUBMIT_BIT - Command buffer will be rerecorded right after executing once
+	//	RENDER_PASS_CONTINUE_BIT - Secondary command buffer that will be within a single render pass
+	//	SIMULTANEOUS_USE_BIT - Command buffer can be resubmitted while already pending execution
+	beginInfo.flags = 0; // Optional
+
+	// Only needed for secondary command buffers
+	beginInfo.pInheritanceInfo = nullptr; // Optional
+
+	// Begin the command buffer
+	if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to begin recording command buffer!");
+	}
+
+	//*****************************************************************************
+	//	Start a render pass
+	//		Drawing starts by starting a render pass
+	//*****************************************************************************
+	VkRenderPassBeginInfo renderPassInfo{};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+
+	// What render pass to use, and what frame buffer to use
+	renderPassInfo.renderPass = renderPass_;
+	renderPassInfo.framebuffer = swapChainFramebuffers_[imageIndex];
+
+	// Define the render area, should match the size of attachments for best performance
+	renderPassInfo.renderArea.offset = { 0, 0 };
+	renderPassInfo.renderArea.extent = swapChainExtent_;
+
+	// What color to clear with, just go with black to start
+	VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+	renderPassInfo.clearValueCount = 1;
+	renderPassInfo.pClearValues = &clearColor;
+
+	// Now actually begin the render pass
+	vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+	// vkCmd prefix is a function that records a command
+	// First parameter for a command is always the command buffer to record command to
+	// Seconds parameter specified details of the render pass
+	// Final parameter controlls how commands within render pass will be provided
+	// Two values:
+	//	INLINE - embedded in the primary command buffer itself & no secondary command buffer execution
+	//	SECONDARY_COMMAND_BUFFERS - Render pass commands will be executed from secondary command buffers
+
+	//*****************************************************************************
+	//	Some basic drawing commands
+	//*****************************************************************************
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipeline_);
+
+	// Viewport and scissor are dynamic, so need to specify here
+	VkViewport viewport{};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = static_cast<float>(swapChainExtent_.width);
+	viewport.height = static_cast<float>(swapChainExtent_.height);
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+	VkRect2D scissor{};
+	scissor.offset = { 0,0 };
+	scissor.extent = swapChainExtent_;
+	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+	// Now with those set, we can call the command to draw our triangles
+	// Parameters:
+	//	The command buffer to record to
+	//	How many vertices to render
+	//	How many instances to render
+	//	Offset into vertex buffer, defines lowest value of gl_VertexIndex
+	//	Offset for instanced rendering, defined lowest value of gl_InstanceIndex
+	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+	// Now we end the render pass
+	vkCmdEndRenderPass(commandBuffer);
+
+	// Finish rerecording the command buffer
+	if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to record command buffer!");
 	}
 }
 

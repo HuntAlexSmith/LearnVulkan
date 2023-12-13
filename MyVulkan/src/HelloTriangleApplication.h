@@ -74,6 +74,8 @@ private:
 	void createCommandPool();
 	void createCommandBuffer();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+	void drawFrame();
+	void createSyncObjects();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -115,4 +117,9 @@ private:
 	VkCommandPool commandPool_; //!< Pool for managing buffers and command buffers
 
 	VkCommandBuffer commandBuffer_; //!< Command buffer for the command pool
+
+	VkSemaphore imageAvailableSemaphore_; //!< Semaphore for checking if image is available
+	VkSemaphore renderFinishedSemaphore_; //!< Semaphore for checking if rendering has finished
+
+	VkFence inFlightFence_; //!< An image is currently being rendered
 };

@@ -72,7 +72,7 @@ private:
 	void createRenderPass();
 	void createFramebuffers();
 	void createCommandPool();
-	void createCommandBuffer();
+	void createCommandBuffers();
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void drawFrame();
 	void createSyncObjects();
@@ -116,10 +116,12 @@ private:
 
 	VkCommandPool commandPool_; //!< Pool for managing buffers and command buffers
 
-	VkCommandBuffer commandBuffer_; //!< Command buffer for the command pool
+	std::vector<VkCommandBuffer> commandBuffers_; //!< Command buffer for the command pool
 
-	VkSemaphore imageAvailableSemaphore_; //!< Semaphore for checking if image is available
-	VkSemaphore renderFinishedSemaphore_; //!< Semaphore for checking if rendering has finished
+	std::vector<VkSemaphore> imageAvailableSemaphores_; //!< Semaphore for checking if image is available
+	std::vector<VkSemaphore> renderFinishedSemaphores_; //!< Semaphore for checking if rendering has finished
 
-	VkFence inFlightFence_; //!< An image is currently being rendered
+	std::vector<VkFence> inFlightFences_; //!< An image is currently being rendered
+
+	uint32_t curFrame_ = 0; //!< The current frame to render
 };

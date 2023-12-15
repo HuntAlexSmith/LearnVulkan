@@ -19,6 +19,13 @@
 #include <algorithm>
 #include <fstream>
 
+// Hard codes vertices for our mesh
+const std::vector<Vertex> vertices = {
+	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
+
 // Window const sizes
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -286,6 +293,9 @@ void HelloTriangleApplication::cleanup() {
 
 	// Destroy the swap chain
 	cleanupSwapChain();
+
+	// Destroy the vertex buffer
+	vkDestroyBuffer(logicalDevice_, vertexBuffer_, nullptr);
 
 	// Destroy the graphics pipeline
 	vkDestroyPipeline(logicalDevice_, gfxPipeline_, nullptr);
@@ -788,13 +798,19 @@ void HelloTriangleApplication::createGraphicsPipeline() {
 	VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
+	// Getting binding and attribute descriptions for this pipeline
+	auto bindingDescription = Vertex::getBindingDescription();
+	auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
 	// Spacing between data and whether data is per-vertex or per-instance (instancing)
-	vertexInputInfo.vertexBindingDescriptionCount = 0;
-	vertexInputInfo.pVertexBindingDescriptions = nullptr;   // Optional
+	// Optional
+	vertexInputInfo.vertexBindingDescriptionCount = 1;
+	vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
 
 	// Type of attributes passed to vertex shader, what binding they associate to, and at which offset.
-	vertexInputInfo.vertexAttributeDescriptionCount = 0;
-	vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+	// Optional
+	vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+	vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
 	//****************************************************************************
 	//	Input Assembly State Creation information
@@ -1521,6 +1537,28 @@ void HelloTriangleApplication::recreateSwapChain() {
 	createSwapChain();
 	createImageViews();
 	createFramebuffers();
+}
+
+// Function for creating an actual vertex buffer
+void HelloTriangleApplication::createVertexBuffer() {
+	// The usual of creating a create struct
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+
+	// Size of the buffer in bytes
+	bufferInfo.size = sizeof(vertices[0]) * vertices.size();
+
+	// How will this buffer be used. It is a vertex buffer
+	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+	// Buffers can be owned by a specific queue family or be shared between multiple.
+	// It will only be used for the graphics queue, so we are not worried
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	// Actually create the buffer
+	if (vkCreateBuffer(logicalDevice_, &bufferInfo, nullptr, &vertexBuffer_) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create vertex buffer!");
+	}
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

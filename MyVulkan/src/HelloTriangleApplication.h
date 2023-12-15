@@ -18,6 +18,69 @@
 
 #include <vector>
 #include <optional>
+#include <array>
+
+#include <glm/glm.hpp>
+
+// Struct for handling a mesh vertex
+struct Vertex {
+	glm::vec2 pos;   //!< Position of this vertex
+	glm::vec3 color; //!< Color at this vertex
+
+	// Function for getting how to bind this input
+	static VkVertexInputBindingDescription getBindingDescription() {
+		// Struct for specifying the description
+		VkVertexInputBindingDescription bindingDescription{};
+
+		// Where the input will bind to
+		bindingDescription.binding = 0;
+
+		// The stride of the input
+		bindingDescription.stride = sizeof(Vertex);
+
+		// Two options for this:
+		//	VERTEX - Move to next data entry after each vertex
+		//	INSTANCE - Move to next data entry after each instance
+		bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+		return bindingDescription;
+	}
+
+	// Function for getting attribute descriptions
+	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+		// Describe the position attribute
+
+		// What binding the per-vertex data comes from
+		attributeDescriptions[0].binding = 0;
+
+		// The location of the attribute in the shader
+		attributeDescriptions[0].location = 0;
+
+		// The data type of the attribute. Common typings are:
+		//	float - VK_FORMAT_R32_SFLOAT
+		//	vec2 - VK_FORMAT_R32G32_SFLOAT
+		//	vec3 - VK_FORMAT_R32G32B32_SFLOAT
+		//	vec4 - VK_FORMAT_R32G32B32A32_SFLOAT
+		// Make sure to also match the typings correctly:
+		//	ivec2 - VK_FORMAT_R32G32_SINT
+		//	uvec4 - VK_FORMAT_R32G32B32A32_UINT
+		//	double - VK_FORMAT_R64_SFLOAT
+		attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+
+		// Number of bytes since the start of the per-vertex data
+		attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+		// Describe the color attribute
+		attributeDescriptions[1].binding = 0;
+		attributeDescriptions[1].location = 1;
+		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+		return attributeDescriptions;
+	}
+};
 
 // Struct for Queue Families
 struct QueueFamilyIndices {
@@ -81,6 +144,7 @@ private:
 	void createSyncObjects();
 	void recreateSwapChain();
 	void cleanupSwapChain();
+	void createVertexBuffer();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -131,4 +195,6 @@ private:
 	bool framebufferResized_ = false; //!< For handling window resize explicitly
 
 	uint32_t curFrame_ = 0; //!< The current frame to render
+
+	VkBuffer vertexBuffer_; //!< Vertex buffer for triangle mesh
 };

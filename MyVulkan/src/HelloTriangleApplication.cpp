@@ -69,6 +69,12 @@ static std::vector<char> readFile(const std::string& filename) {
 	return buffer;
 }
 
+// glfw resize callback function
+static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+	auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+	app->windowResized();
+}
+
 // Function for creating debug messenger (checks if the layer is available or not)
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
 	auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
@@ -103,10 +109,14 @@ void HelloTriangleApplication::initWindow() {
 
 	// Tell GLFW to not create a gl context and no resizable window
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
 	// Create the GLFW window
 	window_ = glfwCreateWindow(WIDTH, HEIGHT, "My Vulkan Window", nullptr, nullptr);
+
+	// We want this if we need to explicitly handle a resize.
+	// Make sure glfw knows the user pointer
+	glfwSetWindowUserPointer(window_, this);
+	glfwSetFramebufferSizeCallback(window_, framebufferResizeCallback);
 }
 
 // Initialize vulkan
@@ -274,20 +284,8 @@ void HelloTriangleApplication::cleanup() {
 	// Note: The VkPhysicalDevice is destroyed when the instance is destroyed
 	//	so we don't need to worry about it
 
-	// Destroy the sync objects we have
-	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-		vkDestroySemaphore(logicalDevice_, renderFinishedSemaphores_[i], nullptr);
-		vkDestroySemaphore(logicalDevice_, imageAvailableSemaphores_[i], nullptr);
-		vkDestroyFence(logicalDevice_, inFlightFences_[i], nullptr);
-	}
-
-	// Don't forget to destroy the command pool
-	vkDestroyCommandPool(logicalDevice_, commandPool_, nullptr);
-
-	// Destroy the frame buffers
-	for (auto framebuffer : swapChainFramebuffers_) {
-		vkDestroyFramebuffer(logicalDevice_, framebuffer, nullptr);
-	}
+	// Destroy the swap chain
+	cleanupSwapChain();
 
 	// Destroy the graphics pipeline
 	vkDestroyPipeline(logicalDevice_, gfxPipeline_, nullptr);
@@ -298,13 +296,15 @@ void HelloTriangleApplication::cleanup() {
 	// Destroy the render passs
 	vkDestroyRenderPass(logicalDevice_, renderPass_, nullptr);
 
-	// Clean up the image views
-	for (auto imageView : swapChainImageViews_) {
-		vkDestroyImageView(logicalDevice_, imageView, nullptr);
+	// Destroy the sync objects we have
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		vkDestroySemaphore(logicalDevice_, renderFinishedSemaphores_[i], nullptr);
+		vkDestroySemaphore(logicalDevice_, imageAvailableSemaphores_[i], nullptr);
+		vkDestroyFence(logicalDevice_, inFlightFences_[i], nullptr);
 	}
 
-	// Destroy the swapchain
-	vkDestroySwapchainKHR(logicalDevice_, swapChain_, nullptr);
+	// Don't forget to destroy the command pool
+	vkDestroyCommandPool(logicalDevice_, commandPool_, nullptr);
 
 	// Don't forget to destroy the logical device
 	vkDestroyDevice(logicalDevice_, nullptr);
@@ -1353,13 +1353,28 @@ void HelloTriangleApplication::drawFrame() {
 	//	Timeout
 	vkWaitForFences(logicalDevice_, 1, &inFlightFences_[curFrame_], VK_TRUE, UINT64_MAX);
 
-	// After waiting for the fence, remember to reset the fence to unsignaled
-	vkResetFences(logicalDevice_, 1, &inFlightFences_[curFrame_]);
-
 	// Now we grab an image from our swap chain
 	// Returns an index of an image in our swap chain, as well as uses the semaphore for acquiring
 	uint32_t imageIndex;
-	vkAcquireNextImageKHR(logicalDevice_, swapChain_, UINT64_MAX, imageAvailableSemaphores_[curFrame_], VK_NULL_HANDLE, &imageIndex);
+	VkResult result = vkAcquireNextImageKHR(logicalDevice_, swapChain_, UINT64_MAX, imageAvailableSemaphores_[curFrame_], VK_NULL_HANDLE, &imageIndex);
+
+	// We need to handle if the current swap chain is invalid
+	//	ERROR_OUT_OF_DATE_KHR - 
+	//		Swap chain is incompatible with surface and can't be used for rendering. Usually window resize
+	if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+		framebufferResized_ = false;
+		recreateSwapChain();
+		return;
+	}
+	//	SUBOPTIMAL_KHR -
+	//		Swap chain can still be used, but surface properties don't match exactly
+	else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+		throw std::runtime_error("Failed to acquire swap chain image!");
+	}
+
+	// After waiting for the fence, remember to reset the fence to unsignaled
+	//	Only reset when we guarantee work is being submitted
+	vkResetFences(logicalDevice_, 1, &inFlightFences_[curFrame_]);
 
 	// Reset our command buffer, then record our command buffer
 	vkResetCommandBuffer(commandBuffers_[curFrame_], 0);
@@ -1414,7 +1429,18 @@ void HelloTriangleApplication::drawFrame() {
 	presentInfo.pResults = nullptr; // Optional
 
 	// Now present the image!
-	vkQueuePresentKHR(presentQueue_, &presentInfo);
+	result = vkQueuePresentKHR(presentQueue_, &presentInfo);
+
+	// Recreate swap chain if out of date or suboptimal
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized_) {
+		framebufferResized_ = false;
+		recreateSwapChain();
+	}
+
+	// This is just a failure
+	else if (result != VK_SUCCESS) {
+		throw std::runtime_error("Failed to present swap chain image!");
+	}
 
 	// Remember to advance to the next frame
 	curFrame_ = (curFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -1452,6 +1478,49 @@ void HelloTriangleApplication::createSyncObjects() {
 			throw std::runtime_error("Failed to create Semaphores or Fences");
 		}
 	}
+}
+
+void HelloTriangleApplication::cleanupSwapChain() {
+	// Destroy the frame buffers
+	for (auto framebuffer : swapChainFramebuffers_) {
+		vkDestroyFramebuffer(logicalDevice_, framebuffer, nullptr);
+	}
+
+	// Clean up the image views
+	for (auto imageView : swapChainImageViews_) {
+		vkDestroyImageView(logicalDevice_, imageView, nullptr);
+	}
+
+	// Destroy the swapchain
+	vkDestroySwapchainKHR(logicalDevice_, swapChain_, nullptr);
+}
+
+//*****************************************************************************
+//	This function is for recreating the swap chain to handle the window being
+//		resized
+//*****************************************************************************
+void HelloTriangleApplication::recreateSwapChain() {
+	// Need to handle if the window is minimized
+	int width = 0, height = 0;
+	glfwGetFramebufferSize(window_, &width, &height);
+	while (width == 0 || height == 0) {
+		// Always call glfwGetFrameBuffer size
+		glfwGetFramebufferSize(window_, &width, &height);
+
+		// glfw will wait until an event is called
+		glfwWaitEvents();
+	}
+
+	// Free up the locks
+	vkDeviceWaitIdle(logicalDevice_);
+
+	// Clean up the current swap chain
+	cleanupSwapChain();
+
+	// Re-Create the swap chain
+	createSwapChain();
+	createImageViews();
+	createFramebuffers();
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

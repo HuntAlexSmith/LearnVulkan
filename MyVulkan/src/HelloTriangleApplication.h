@@ -41,6 +41,9 @@ public:
 
 	// Member functions
 	void run();
+	
+	// Set flag for window being resized
+	void windowResized() { framebufferResized_ = true; }
 
 private:
 
@@ -76,6 +79,8 @@ private:
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 	void drawFrame();
 	void createSyncObjects();
+	void recreateSwapChain();
+	void cleanupSwapChain();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -122,6 +127,8 @@ private:
 	std::vector<VkSemaphore> renderFinishedSemaphores_; //!< Semaphore for checking if rendering has finished
 
 	std::vector<VkFence> inFlightFences_; //!< An image is currently being rendered
+
+	bool framebufferResized_ = false; //!< For handling window resize explicitly
 
 	uint32_t curFrame_ = 0; //!< The current frame to render
 };

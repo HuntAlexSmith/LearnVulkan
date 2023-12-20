@@ -8,6 +8,16 @@
 *		All code is referenced from: https://vulkan-tutorial.com/
 ******************************************************************************/
 
+//*****************************************************************************
+//	CHALLENGE:
+//		Specify a Transfer queue that is not the Graphics queue or the compute
+//		queue.
+//	The graphics queue already handles memory transfers, but then you have
+//		a queue being used for multiple purposes. May be a good idea to have
+//		a separate queue that is purely for transfering buffers over from
+//		CPU to GPU
+//*****************************************************************************
+
 #include "HelloTriangleApplication.h"
 
 #include <stdexcept>
@@ -1554,63 +1564,57 @@ void HelloTriangleApplication::recreateSwapChain() {
 
 // Function for creating an actual vertex buffer
 void HelloTriangleApplication::createVertexBuffer() {
-	// The usual of creating a create struct
-	VkBufferCreateInfo bufferInfo{};
-	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	// Specify the buffer size
+	VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
-	// Size of the buffer in bytes
-	bufferInfo.size = sizeof(vertices[0]) * vertices.size();
+	// We will create a staging buffer, that will be temporary buffer on CPU
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
 
-	// How will this buffer be used. It is a vertex buffer
-	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	// Two types of transfer flags:
+	//	SRC - Buffer can be used as a source in a memory transfer operation
+	//	DST - Buffer can be used as a destination in a memory transfer operation
+	VkBufferUsageFlags stagingBufferType = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
-	// Buffers can be owned by a specific queue family or be shared between multiple.
-	// It will only be used for the graphics queue, so we are not worried
-	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-	// Actually create the buffer
-	if (vkCreateBuffer(logicalDevice_, &bufferInfo, nullptr, &vertexBuffer_) != VK_SUCCESS) {
-		throw std::runtime_error("Failed to create vertex buffer!");
-	}
-
-	// Get the requirements to allocate memory
-	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(logicalDevice_, vertexBuffer_, &memRequirements);
-
-	// Now we want to actually allocate memory to the buffer
-	VkMemoryAllocateInfo allocInfo{};
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memRequirements.size;
-
-	// Make sure we specify the memory type we need
-	VkMemoryPropertyFlags memFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, memFlags);
-
-	if (vkAllocateMemory(logicalDevice_, &allocInfo, nullptr, &vertexBufferMemory_) != VK_SUCCESS) {
-		throw std::runtime_error("Failed to allocate vertex buffer memory!");
-	}
-
-	// After successful memory allocation, we can now associate this memory with the vertex buffer
-	//	Last parameter is an offset into the region of memory
-	vkBindBufferMemory(logicalDevice_, vertexBuffer_, vertexBufferMemory_, 0);
+	// This buffer is visible to the CPU
+	VkMemoryPropertyFlags stagingMemoryProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	createBuffer(bufferSize, stagingBufferType, stagingMemoryProps, stagingBuffer, stagingBufferMemory);
 
 	// Now we have data we want to copy into the buffer
 	void* data;
 
 	// Map the memory so CPU knows where to put memory
-	vkMapMemory(logicalDevice_, vertexBufferMemory_, 0, bufferInfo.size, 0, &data);
+	vkMapMemory(logicalDevice_, stagingBufferMemory, 0, bufferSize, 0, &data);
 
 	// Simply memcpy our vertex data into the buffer
-	memcpy(data, vertices.data(), (size_t)bufferInfo.size);
+	memcpy(data, vertices.data(), (size_t)bufferSize);
 
 	// Now unmap the memory, since we have already copied the data over
-	vkUnmapMemory(logicalDevice_, vertexBufferMemory_);
+	vkUnmapMemory(logicalDevice_, stagingBufferMemory);
 
+	// Now create the vertex buffer (It can now be the destination for a memory transfer
+	VkBufferUsageFlags bufferType = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+	// This buffer only exists on the GPU
+	VkMemoryPropertyFlags memoryProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+	// Now, when we create the vertex buffer, we can copy the staging buffer info the vertex buffer
+	createBuffer(bufferSize, bufferType, memoryProps, vertexBuffer_, vertexBufferMemory_);
+	copyBuffer(stagingBuffer, vertexBuffer_, bufferSize);
+
+	// Once the data is copied over, we should free up the temporary staging buffer
+	vkDestroyBuffer(logicalDevice_, stagingBuffer, nullptr);
+	vkFreeMemory(logicalDevice_, stagingBufferMemory, nullptr);
+
+	// NOTES:
 	// Driver may not immediately copy data into the buffer memory (due to caching as example)
 	//	Two ways to solve this are:
 	//	  - Use memory heap that is host coherent (which we already indicated)
 	//	  - Manually flush the memory after writing and invalidating the memory before reading
 	//	The first way may have worse performance
+
+	// In a real world application, you should not call VkAllocateMemory for every individual buffer
+	//	
 }
 
 // We need to figure out what types of memory our GPU has
@@ -1635,6 +1639,95 @@ uint32_t HelloTriangleApplication::findMemoryType(uint32_t typeFilter, VkMemoryP
 	}
 
 	throw std::runtime_error("Failed to find suitable memory type!");
+}
+
+// Abstract function for creating a buffer
+void HelloTriangleApplication::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+	// The usual of creating a create struct
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+
+	// Size of the buffer in bytes
+	bufferInfo.size = size;
+
+	// How will this buffer be used. It is a vertex buffer
+	bufferInfo.usage = usage;
+
+	// Buffers can be owned by a specific queue family or be shared between multiple.
+	// It will only be used for the graphics queue, so we are not worried
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	// Actually create the buffer
+	if (vkCreateBuffer(logicalDevice_, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create buffer!");
+	}
+
+	// Get the requirements to allocate memory
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(logicalDevice_, buffer, &memRequirements);
+
+	// Now we want to actually allocate memory to the buffer
+	VkMemoryAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+
+	// Make sure we specify the memory type we need
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+	if (vkAllocateMemory(logicalDevice_, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to allocate buffer memory!");
+	}
+
+	// After successful memory allocation, we can now associate this memory with the vertex buffer
+	//	Last parameter is an offset into the region of memory
+	vkBindBufferMemory(logicalDevice_, buffer, bufferMemory, 0);
+}
+
+// Fucntion for copying over a buffer to another buffer
+void HelloTriangleApplication::copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size) {
+	// We will create a temporary command buffer to perform the operation.
+	//	It is possible to create a separate command pool for these operations, and it may
+	//	apply allocation optimizations.
+	//		When creating this command pool, use TRANSIENT_BIT, as the commands will be 
+	//		short lived
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandPool = commandPool_;
+	allocInfo.commandBufferCount = 1;
+
+	VkCommandBuffer commandBuffer;
+	vkAllocateCommandBuffers(logicalDevice_, &allocInfo, &commandBuffer);
+
+	// Now immediately start recording the command buffer
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // We will only submit this command once
+	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+	// Now submit the copy buffer command
+	VkBufferCopy copyRegion{};
+	copyRegion.srcOffset = 0; // Optional
+	copyRegion.dstOffset = 0; // Optional
+	copyRegion.size = size;
+	vkCmdCopyBuffer(commandBuffer, src, dst, 1, &copyRegion);
+
+	// Remember to end the command buffer
+	vkEndCommandBuffer(commandBuffer);
+
+	// Now we need to execute the command buffer
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+	vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+
+	// We just want to wait for this command to finish executing
+	//	If we used a fence, we could allow multiple memory transfers in parallel
+	vkQueueWaitIdle(graphicsQueue_);
+
+	// We did everything we needed with out command buffer, remember to free it
+	vkFreeCommandBuffers(logicalDevice_, commandPool_, 1, &commandBuffer);
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

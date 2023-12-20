@@ -146,6 +146,8 @@ private:
 	void cleanupSwapChain();
 	void createVertexBuffer();
 	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(

@@ -145,6 +145,7 @@ private:
 	void recreateSwapChain();
 	void cleanupSwapChain();
 	void createVertexBuffer();
+	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -197,4 +198,5 @@ private:
 	uint32_t curFrame_ = 0; //!< The current frame to render
 
 	VkBuffer vertexBuffer_; //!< Vertex buffer for triangle mesh
+	VkDeviceMemory vertexBufferMemory_; //!< Memory for our vertex buffer
 };

@@ -145,6 +145,7 @@ private:
 	void recreateSwapChain();
 	void cleanupSwapChain();
 	void createVertexBuffer();
+	void createIndexBuffer();
 	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
 	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
@@ -201,4 +202,7 @@ private:
 
 	VkBuffer vertexBuffer_; //!< Vertex buffer for triangle mesh
 	VkDeviceMemory vertexBufferMemory_; //!< Memory for our vertex buffer
+
+	VkBuffer indexBuffer_; //!< Index buffer for indexed rendering
+	VkDeviceMemory indexBufferMemory_; //!< The buffer memory for the index buffer
 };

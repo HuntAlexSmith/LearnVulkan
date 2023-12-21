@@ -31,9 +31,14 @@
 
 // Hard codes vertices for our mesh
 const std::vector<Vertex> vertices = {
-	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+
+const std::vector<uint16_t> indices = {
+	0, 1, 2, 2, 3, 0
 };
 
 // Window const sizes
@@ -174,6 +179,9 @@ void HelloTriangleApplication::initVulkan() {
 	// Create the vertex buffer
 	createVertexBuffer();
 
+	// Create the index buffer
+	createIndexBuffer();
+
 	// Create the command buffers
 	createCommandBuffers();
 
@@ -308,6 +316,10 @@ void HelloTriangleApplication::cleanup() {
 
 	// Destroy the swap chain
 	cleanupSwapChain();
+
+	// Destroy the index buffer and free its memory
+	vkDestroyBuffer(logicalDevice_, indexBuffer_, nullptr);
+	vkFreeMemory(logicalDevice_, indexBufferMemory_, nullptr);
 
 	// Destroy the vertex buffer
 	vkDestroyBuffer(logicalDevice_, vertexBuffer_, nullptr);
@@ -1332,6 +1344,9 @@ void HelloTriangleApplication::recordCommandBuffer(VkCommandBuffer commandBuffer
 	VkDeviceSize offsets[] = { 0 };
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
+	// Also specify the index buffer we are using
+	vkCmdBindIndexBuffer(commandBuffer, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+
 	// Viewport and scissor are dynamic, so need to specify here
 	VkViewport viewport{};
 	viewport.x = 0.0f;
@@ -1354,7 +1369,7 @@ void HelloTriangleApplication::recordCommandBuffer(VkCommandBuffer commandBuffer
 	//	How many instances to render
 	//	Offset into vertex buffer, defines lowest value of gl_VertexIndex
 	//	Offset for instanced rendering, defined lowest value of gl_InstanceIndex
-	vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+	vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
 	// Now we end the render pass
 	vkCmdEndRenderPass(commandBuffer);
@@ -1614,7 +1629,52 @@ void HelloTriangleApplication::createVertexBuffer() {
 	//	The first way may have worse performance
 
 	// In a real world application, you should not call VkAllocateMemory for every individual buffer
-	//	
+	//	Maximum number of simultaneous memory allocations is limited by the physical device,
+	//	which can be as low as 4096, meaning only 4096 buffers if allocated this way.
+}
+
+void HelloTriangleApplication::createIndexBuffer() {
+	VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+	// We will create a staging buffer, that will be temporary buffer on CPU
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+
+	// Two types of transfer flags:
+	//	SRC - Buffer can be used as a source in a memory transfer operation
+	//	DST - Buffer can be used as a destination in a memory transfer operation
+	VkBufferUsageFlags stagingBufferType = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+	// This buffer is visible to the CPU
+	VkMemoryPropertyFlags stagingMemoryProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	createBuffer(bufferSize, stagingBufferType, stagingMemoryProps, stagingBuffer, stagingBufferMemory);
+
+	// Now we have data we want to copy into the buffer
+	void* data;
+
+	// Map the memory so CPU knows where to put memory
+	vkMapMemory(logicalDevice_, stagingBufferMemory, 0, bufferSize, 0, &data);
+
+	// Simply memcpy our vertex data into the buffer
+	memcpy(data, indices.data(), (size_t)bufferSize);
+
+	// Now unmap the memory, since we have already copied the data over
+	vkUnmapMemory(logicalDevice_, stagingBufferMemory);
+
+	// Now create the index buffer (It can now be the destination for a memory transfer
+	VkBufferUsageFlags bufferType = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+
+	// This buffer only exists on the GPU
+	VkMemoryPropertyFlags memoryProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	
+	createBuffer(bufferSize, bufferType, memoryProps, indexBuffer_, indexBufferMemory_);
+
+	// copy the temp buffer over to the GPU
+	copyBuffer(stagingBuffer, indexBuffer_, bufferSize);
+
+	// Delete the temporary staging buffer
+	vkDestroyBuffer(logicalDevice_, stagingBuffer, nullptr);
+	vkFreeMemory(logicalDevice_, stagingBufferMemory, nullptr);
 }
 
 // We need to figure out what types of memory our GPU has

@@ -20,7 +20,9 @@
 #include <optional>
 #include <array>
 
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 // Struct for handling a mesh vertex
 struct Vertex {
@@ -99,6 +101,13 @@ struct SwapChainSupportDetails {
 	std::vector<VkPresentModeKHR> presentModes;
 };
 
+// Struct for our uniform buffer
+struct UniformBufferObject {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
+};
+
 class HelloTriangleApplication {
 public:
 
@@ -149,6 +158,11 @@ private:
 	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
 	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
+	void createDescriptorSetLayout();
+	void createUniformBuffers();
+	void updateUniformBuffer(uint32_t currentImage);
+	void createDescriptorPool();
+	void createDescriptorSets();
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -181,6 +195,7 @@ private:
 	VkExtent2D swapChainExtent_;    //!< The extent of the swap chain
 
 	VkRenderPass renderPass_; //!< The render pass
+	VkDescriptorSetLayout descriptorSetLayout_; //!< Layout for uniform variables
 	VkPipelineLayout pipelineLayout_; //!< The pipeline layout (uniform variables)
 
 	VkPipeline gfxPipeline_; //!< The actual rendering pipeline
@@ -205,4 +220,11 @@ private:
 
 	VkBuffer indexBuffer_; //!< Index buffer for indexed rendering
 	VkDeviceMemory indexBufferMemory_; //!< The buffer memory for the index buffer
+	
+	std::vector<VkBuffer> uniformBuffers_; //!< Handles to uniform buffers
+	std::vector<VkDeviceMemory> uniformBuffersMemory_; //!< The memory of the uniform buffers
+	std::vector<void*> uniformBuffersMapped_; //!< The uniform buffers mapped for writing
+
+	VkDescriptorPool descriptorPool_; //!< Pool for allocating descriptors
+	std::vector<VkDescriptorSet> descriptorSets_; //!< The descriptor sets
 };

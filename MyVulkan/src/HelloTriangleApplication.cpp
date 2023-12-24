@@ -28,6 +28,7 @@
 #include <limits>
 #include <algorithm>
 #include <fstream>
+#include <chrono>
 
 // Hard codes vertices for our mesh
 const std::vector<Vertex> vertices = {
@@ -167,6 +168,9 @@ void HelloTriangleApplication::initVulkan() {
 	// Create a render pass
 	createRenderPass();
 
+	// Create a layout for uniform variables
+	createDescriptorSetLayout();
+
 	// Create a graphics pipeline
 	createGraphicsPipeline();
 
@@ -181,6 +185,15 @@ void HelloTriangleApplication::initVulkan() {
 
 	// Create the index buffer
 	createIndexBuffer();
+
+	// Create the uniform buffers
+	createUniformBuffers();
+
+	// Create a descriptor pool
+	createDescriptorPool();
+
+	// Create descriptor sets
+	createDescriptorSets();
 
 	// Create the command buffers
 	createCommandBuffers();
@@ -316,6 +329,20 @@ void HelloTriangleApplication::cleanup() {
 
 	// Destroy the swap chain
 	cleanupSwapChain();
+
+	// Destroy the uniform buffers
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		// Destroying the buffer first makes it so that the memory is not in use
+		//	, allowing it to be freed with no issues
+		vkDestroyBuffer(logicalDevice_, uniformBuffers_[i], nullptr);
+		vkFreeMemory(logicalDevice_, uniformBuffersMemory_[i], nullptr);
+	}
+
+	// Destroy the descriptor pool, which will implicitly destroy any allocated sets
+	vkDestroyDescriptorPool(logicalDevice_, descriptorPool_, nullptr);
+	
+	// Destroy the uniform layout descriptor
+	vkDestroyDescriptorSetLayout(logicalDevice_, descriptorSetLayout_, nullptr);
 
 	// Destroy the index buffer and free its memory
 	vkDestroyBuffer(logicalDevice_, indexBuffer_, nullptr);
@@ -910,7 +937,7 @@ void HelloTriangleApplication::createGraphicsPipeline() {
 	// Cull mode and what the rasterizer considered front facing
 	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
 	// TODO: THIS SHOULD BE COUNTER CLOCK-WISE. RIGHT HAND RULE!!!
-	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
 	// Rasterizer can change depth values by biasing them with constant values
 	//	or biasing them based on a fragment's slope
@@ -1002,8 +1029,10 @@ void HelloTriangleApplication::createGraphicsPipeline() {
 	//****************************************************************************
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipelineLayoutInfo.setLayoutCount = 0; // Optional
-	pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+
+	// We are specifying a uniform layout
+	pipelineLayoutInfo.setLayoutCount = 1; // Optional
+	pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout_; // Optional
 	pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
 	pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 
@@ -1362,6 +1391,9 @@ void HelloTriangleApplication::recordCommandBuffer(VkCommandBuffer commandBuffer
 	scissor.extent = swapChainExtent_;
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+	// Make sure to bind the uniforms correctly here
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &descriptorSets_[curFrame_], 0, nullptr);
+
 	// Now with those set, we can call the command to draw our triangles
 	// Parameters:
 	//	The command buffer to record to
@@ -1433,6 +1465,9 @@ void HelloTriangleApplication::drawFrame() {
 	// Reset our command buffer, then record our command buffer
 	vkResetCommandBuffer(commandBuffers_[curFrame_], 0);
 	recordCommandBuffer(commandBuffers_[curFrame_], imageIndex);
+
+	// Update the uniform buffer
+	updateUniformBuffer(curFrame_);
 
 	// Now we want to submit our command buffer
 	VkSubmitInfo submitInfo{};
@@ -1788,6 +1823,174 @@ void HelloTriangleApplication::copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSi
 
 	// We did everything we needed with out command buffer, remember to free it
 	vkFreeCommandBuffers(logicalDevice_, commandPool_, 1, &commandBuffer);
+}
+
+// Function for creating a uniform variable layout for use in shaders
+void HelloTriangleApplication::createDescriptorSetLayout() {
+	// Struct for defining the binding layout
+	VkDescriptorSetLayoutBinding uboLayoutBinding{};
+
+	// Uniform buffer is laid out at 0
+	uboLayoutBinding.binding = 0;
+
+	// It is a uniform buffer
+	uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+
+	// There is one uniform block
+	uboLayoutBinding.descriptorCount = 1;
+
+	// What stage are the uniforms in
+	//	Can be an or combination of multiple flags,
+	//	or just ALL_GRAPHICS
+	uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+	// Only relevant for image sampling
+	uboLayoutBinding.pImmutableSamplers = nullptr; // Optional
+
+	// Now we will actually create the layout
+	VkDescriptorSetLayoutCreateInfo layoutInfo{};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 1;
+	layoutInfo.pBindings = &uboLayoutBinding;
+
+	if (vkCreateDescriptorSetLayout(logicalDevice_, &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create descriptor set layout!");
+	}
+}
+
+void HelloTriangleApplication::createUniformBuffers() {
+	// How big is the uniform buffer
+	VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+	// Resize our vectors
+	uniformBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
+	uniformBuffersMemory_.resize(MAX_FRAMES_IN_FLIGHT);
+	uniformBuffersMapped_.resize(MAX_FRAMES_IN_FLIGHT);
+
+	// Create the buffers
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		// Create a Uniform buffer and allocate memory to it
+		VkBufferUsageFlags bufferUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		VkMemoryPropertyFlags memProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		createBuffer(bufferSize, bufferUsage, memProps, uniformBuffers_[i], uniformBuffersMemory_[i]);
+
+		// Map the memory to GPU
+		vkMapMemory(logicalDevice_, uniformBuffersMemory_[i], 0, bufferSize, 0, &uniformBuffersMapped_[i]);
+	}
+}
+
+// Helper function for updating the uniform buffer of a given image
+void HelloTriangleApplication::updateUniformBuffer(uint32_t currentImage) {
+	// Get what the start time is as a static variable
+	static auto startTime = std::chrono::high_resolution_clock::now();
+
+	// Figure out the total run time
+	auto curTime = std::chrono::high_resolution_clock::now();
+	float time = std::chrono::duration<float, std::chrono::seconds::period>(curTime - startTime).count();
+
+	// Fill the Uniform Buffer struct
+	UniformBufferObject ubo{};
+
+	// Generate a rotation matrix that rotates around the z-axis
+	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+	// Generate a view matrix given a camera eye, a position to look at, and an up vector (z is up in this case)
+	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+	// Generate a perspective matrix to handle perspective. Use a 45 degree FOV, calculate aspect, and near and far planes
+	ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent_.width / (float)swapChainExtent_.height, 0.1f, 10.0f);
+
+	// Need to multiply by -1 because we are in Vulkan, as glm was designed for OpenGL
+	ubo.proj[1][1] *= -1;
+
+	// Now we have defined all the matrices, now we want to mem copy them into our buffer
+	memcpy(uniformBuffersMapped_[currentImage], &ubo, sizeof(ubo));
+}
+
+// In order to tell the shader the uniform information, so we need to
+//	specify descriptor sets
+void HelloTriangleApplication::createDescriptorPool() {
+	// Define a pool size, which needs to know:
+	//	What the pool will be used for
+	//	How many descriptors there are
+	VkDescriptorPoolSize poolSize{};
+	poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+	// Creation struct for a descriptor pool
+	VkDescriptorPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	poolInfo.poolSizeCount = 1;
+	poolInfo.pPoolSizes = &poolSize;
+
+	// What is the maximum number of descriptors that can be allocated
+	poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+	// Create the pool
+	if (vkCreateDescriptorPool(logicalDevice_, &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create descriptor pool!");
+	}
+}
+
+// Function for creating descriptor sets for uniform buffers
+void HelloTriangleApplication::createDescriptorSets() {
+	std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout_);
+
+	VkDescriptorSetAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+
+	// What pool descriptors will be allocated from
+	allocInfo.descriptorPool = descriptorPool_;
+
+	// How many descriptor sets will be allocated
+	allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+	// pointer to the layouts
+	allocInfo.pSetLayouts = layouts.data();
+
+	// Allocate the descriptor sets
+	descriptorSets_.resize(MAX_FRAMES_IN_FLIGHT);
+	if (vkAllocateDescriptorSets(logicalDevice_, &allocInfo, descriptorSets_.data()) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to allocate descriptor sets");
+	}
+
+	// Now that the descriptors have been allocated, they need to be configured
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		// Specify the uniform buffer info
+		VkDescriptorBufferInfo bufferInfo{};
+
+		// What buffer this descriptor has
+		bufferInfo.buffer = uniformBuffers_[i];
+
+		// Binding offset is zero
+		bufferInfo.offset = 0;
+
+		// Specify a size that will be written to
+		bufferInfo.range = sizeof(UniformBufferObject);
+
+		// Now we need to write the descriptors
+		VkWriteDescriptorSet descriptorWrite{};
+		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrite.dstSet = descriptorSets_[i];
+		descriptorWrite.dstBinding = 0; // Uniform binding is 0
+		descriptorWrite.dstArrayElement = 0; // No array, so 0
+
+		// Descriptor is means for a uniform buffer
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descriptorWrite.descriptorCount = 1;
+
+		// used for buffer descriptors
+		descriptorWrite.pBufferInfo = &bufferInfo;
+
+		// used for image descriptors
+		descriptorWrite.pImageInfo = nullptr; // Optional
+
+		// used for buffer view descriptors
+		descriptorWrite.pTexelBufferView = nullptr; // Optional
+
+		// Now update the descriptors
+		vkUpdateDescriptorSets(logicalDevice_, 1, &descriptorWrite, 0, nullptr);
+	}
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

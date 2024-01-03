@@ -18,7 +18,18 @@
 //		CPU to GPU
 //*****************************************************************************
 
+//*****************************************************************************
+//	CHALLENGE:
+//		Create a setupCommandBuffer that helper functions record commands into
+//		and add a flushSetupCommands, that will execute all the commands that
+//		have been recorded.
+//*****************************************************************************
+
 #include "HelloTriangleApplication.h"
+
+// Image Loading
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 #include <stdexcept>
 #include <iostream>
@@ -180,6 +191,9 @@ void HelloTriangleApplication::initVulkan() {
 	// Create the command pool
 	createCommandPool();
 
+	// Create a texture
+	createTextureImage();
+
 	// Create the vertex buffer
 	createVertexBuffer();
 
@@ -329,6 +343,10 @@ void HelloTriangleApplication::cleanup() {
 
 	// Destroy the swap chain
 	cleanupSwapChain();
+
+	// Destroy the texture image and its memory
+	vkDestroyImage(logicalDevice_, textureImage_, nullptr);
+	vkFreeMemory(logicalDevice_, textureImageMemory_, nullptr);
 
 	// Destroy the uniform buffers
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
@@ -1780,49 +1798,15 @@ void HelloTriangleApplication::createBuffer(VkDeviceSize size, VkBufferUsageFlag
 
 // Fucntion for copying over a buffer to another buffer
 void HelloTriangleApplication::copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size) {
-	// We will create a temporary command buffer to perform the operation.
-	//	It is possible to create a separate command pool for these operations, and it may
-	//	apply allocation optimizations.
-	//		When creating this command pool, use TRANSIENT_BIT, as the commands will be 
-	//		short lived
-	VkCommandBufferAllocateInfo allocInfo{};
-	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	allocInfo.commandPool = commandPool_;
-	allocInfo.commandBufferCount = 1;
 
-	VkCommandBuffer commandBuffer;
-	vkAllocateCommandBuffers(logicalDevice_, &allocInfo, &commandBuffer);
-
-	// Now immediately start recording the command buffer
-	VkCommandBufferBeginInfo beginInfo{};
-	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // We will only submit this command once
-	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+	VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
 	// Now submit the copy buffer command
 	VkBufferCopy copyRegion{};
-	copyRegion.srcOffset = 0; // Optional
-	copyRegion.dstOffset = 0; // Optional
 	copyRegion.size = size;
 	vkCmdCopyBuffer(commandBuffer, src, dst, 1, &copyRegion);
 
-	// Remember to end the command buffer
-	vkEndCommandBuffer(commandBuffer);
-
-	// Now we need to execute the command buffer
-	VkSubmitInfo submitInfo{};
-	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &commandBuffer;
-	vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
-
-	// We just want to wait for this command to finish executing
-	//	If we used a fence, we could allow multiple memory transfers in parallel
-	vkQueueWaitIdle(graphicsQueue_);
-
-	// We did everything we needed with out command buffer, remember to free it
-	vkFreeCommandBuffers(logicalDevice_, commandPool_, 1, &commandBuffer);
+	endSingleTimeCommands(commandBuffer);
 }
 
 // Function for creating a uniform variable layout for use in shaders
@@ -1991,6 +1975,238 @@ void HelloTriangleApplication::createDescriptorSets() {
 		// Now update the descriptors
 		vkUpdateDescriptorSets(logicalDevice_, 1, &descriptorWrite, 0, nullptr);
 	}
+}
+
+// Function for creating a Vk Image 
+void HelloTriangleApplication::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+	// Image creation struct
+	VkImageCreateInfo imageInfo{};
+	imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	imageInfo.imageType = VK_IMAGE_TYPE_2D;
+	imageInfo.extent.width = width;
+	imageInfo.extent.height = height;
+	imageInfo.extent.depth = 1; // REMEMBER TO SPECIFY THE DEPTH AS ONE, program will be very unhappy if forgotten
+	imageInfo.mipLevels = 1;
+	imageInfo.arrayLayers = 1;
+	imageInfo.format = format;
+	imageInfo.tiling = tiling;
+	imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	imageInfo.usage = usage;
+	imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	// Actually create the image
+	if (vkCreateImage(logicalDevice_, &imageInfo, nullptr, &image) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create image!");
+	}
+
+	// Now get memory requirements
+	VkMemoryRequirements memRequirements;
+	vkGetImageMemoryRequirements(logicalDevice_, image, &memRequirements);
+
+	// Create the allocation info
+	VkMemoryAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+	// Perform the actual allocation
+	if (vkAllocateMemory(logicalDevice_, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to allocate image memory!");
+	}
+
+	// Remember to bind the memory to the image handle
+	vkBindImageMemory(logicalDevice_, image, imageMemory, 0);
+}
+
+// Function for creating a texture image
+void HelloTriangleApplication::createTextureImage() {
+	// Load the image using STB Image
+	int texWidth, texHeight, texChannels;
+	stbi_uc* pixels = stbi_load("data\\textures\\GupPointPlead.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+
+	// Calculate the size of the image
+	VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+	// Error checking
+	if (!pixels) {
+		throw std::runtime_error("Failed to load texture image!");
+	}
+
+	// Like last time, we will have a staging buffer
+	VkBuffer stagingBuffer;             // The handle to the buffer
+	VkDeviceMemory stagingBufferMemory; // The actual memory of the buffer
+
+	// Will be the source of a memory transfer, and buffer needs to be seen by host
+	VkBufferUsageFlags bufferUsage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	VkMemoryPropertyFlags memProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	createBuffer(imageSize, bufferUsage, memProps, stagingBuffer, stagingBufferMemory);
+
+	// Map the memory for writing
+	void* data;
+	vkMapMemory(logicalDevice_, stagingBufferMemory, 0, imageSize, 0, &data);
+
+	// Copy the pixels into the memory
+	memcpy(data, pixels, static_cast<size_t>(imageSize));
+
+	// Remember to unmap the memory
+	vkUnmapMemory(logicalDevice_, stagingBufferMemory);
+
+	// Don't forget to free up the image memory now that we have it in a staging buffer
+	stbi_image_free(pixels);
+
+	// Now create the image
+	createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_, textureImageMemory_);
+
+	// In order for us to copy the staging buffer to a texture image, we need to:
+	//	Transition the texture image to DST_OPTIMAL
+	//	Execute the buffer to image copy operation
+	transitionImageLayout(textureImage_, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	copyBufferToImage(stagingBuffer, textureImage_, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+
+	// One more transition to prepare the image for shader access
+	transitionImageLayout(textureImage_, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+	// Remember to destroy the staging buffer
+	vkDestroyBuffer(logicalDevice_, stagingBuffer, nullptr);
+	vkFreeMemory(logicalDevice_, stagingBufferMemory, nullptr);
+}
+
+VkCommandBuffer HelloTriangleApplication::beginSingleTimeCommands() {
+	// Allocation info for the command buffer
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandPool = commandPool_;
+	allocInfo.commandBufferCount = 1;
+
+	// Allocate a command buffer
+	VkCommandBuffer commandBuffer;
+	vkAllocateCommandBuffers(logicalDevice_, &allocInfo, &commandBuffer);
+
+	// Begin the command buffer for a one time use
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+	// Return the command buffer after it has begun
+	return commandBuffer;
+}
+
+void HelloTriangleApplication::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+	// End the given command buffer
+	vkEndCommandBuffer(commandBuffer);
+
+	// Get ready to submit the command buffer
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+
+	// Actually submit the command buffer and wait for it to finish
+	vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+	vkQueueWaitIdle(graphicsQueue_);
+
+	// Remember to free the temporary command buffer
+	vkFreeCommandBuffers(logicalDevice_, commandPool_, 1, &commandBuffer);
+}
+
+void HelloTriangleApplication::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+	VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+	// Set up a memory barrier
+	VkImageMemoryBarrier barrier{};
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.oldLayout = oldLayout; // If you don't care about existing contents, can use UNDEFINED
+	barrier.newLayout = newLayout;
+
+	// We are not transfering queue family ownership, so the source and destination can be ignored
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	// Specify the image being affected, and a specific part of the image
+	barrier.image = image;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.baseMipLevel = 0;
+	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.baseArrayLayer = 0;
+	barrier.subresourceRange.layerCount = 1;
+
+	// We need to specify what stages of the pipeline are being changed based on what we are transitioning to
+	VkPipelineStageFlags srcStage;
+	VkPipelineStageFlags dstStage;
+
+	// Undefined to transfer dst optimal
+	if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+		// Going from undefined to a transfer write
+		barrier.srcAccessMask = 0;
+		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+		// At the top of the pipeline going into a transfer stage
+		srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	}
+
+	// transfer dst optimal to shader read only optimal
+	else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		// Going from a transfer write to a shader read
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+		// Going from a transfer stage to the fragment shader
+		srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+
+	// Invalid
+	else {
+		throw std::invalid_argument("Unsupported layout transition!");
+	}
+
+	vkCmdPipelineBarrier(
+		commandBuffer,
+		srcStage, dstStage,
+		0,
+		0, nullptr,
+		0, nullptr,
+		1, &barrier
+	);
+
+	endSingleTimeCommands(commandBuffer);
+}
+
+void HelloTriangleApplication::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
+	VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+	// Define the region for how we are copying the memory
+	VkBufferImageCopy region{};
+	region.bufferOffset = 0; // Offset into memory
+
+	region.bufferRowLength = 0; 
+	region.bufferImageHeight = 0; // Both zero means the image is tightly packed
+
+	// Define to which part of the image we want to copy pixels to
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.mipLevel = 0;
+	region.imageSubresource.baseArrayLayer = 0;
+	region.imageSubresource.layerCount = 1;
+
+	region.imageOffset = { 0, 0, 0 };
+	region.imageExtent = { width, height, 1 };
+
+	// Queue the copy command
+	vkCmdCopyBufferToImage(
+		commandBuffer,
+		buffer,
+		image,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1,
+		&region
+	);
+
+	endSingleTimeCommands(commandBuffer);
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(

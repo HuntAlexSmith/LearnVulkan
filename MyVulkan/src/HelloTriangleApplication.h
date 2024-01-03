@@ -164,6 +164,12 @@ private:
 	void updateUniformBuffer(uint32_t currentImage);
 	void createDescriptorPool();
 	void createDescriptorSets();
+	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+	void createTextureImage();
+	VkCommandBuffer beginSingleTimeCommands();
+	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 
 	// Debug callback function
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -228,4 +234,7 @@ private:
 
 	VkDescriptorPool descriptorPool_; //!< Pool for allocating descriptors
 	std::vector<VkDescriptorSet> descriptorSets_; //!< The descriptor sets
+
+	VkImage textureImage_; //!< The texture image
+	VkDeviceMemory textureImageMemory_; //!< The memory of the texture
 };
